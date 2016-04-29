@@ -47,3 +47,9 @@ Temporary Items
 .apdisk
 node_modules
 library
+selfEval.js
+recursiveDelete.js
+pre.js
+test.js
+john.js
+index.html
