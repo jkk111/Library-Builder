@@ -11,19 +11,33 @@ if (!module.parent) {
 function buildLibrary(libRoot, cb) {
   var _root = "{";
   var hasEntry = false;
+  var baseName = getDirName(libRoot);
   if(libRoot.charAt(libRoot.length -1) != "/")
     libRoot += "/";
   var rootName = libRoot.substring(0, libRoot.length - 1);
-  var selfEval;
-  fs.writeFileSync("pre.js", handleDirectory(options.dir + libRoot, true))
-  eval(`selfEval = ${handleDirectory(options.dir + libRoot, true)}`);
-  var stringified = stringify_object(selfEval, options.minified == true ? undefined : options.delimiter || "  ");
+  var rootObj = handleDirectory(options.dir + libRoot, true);
+  var stringified = stringify_object(rootObj, options.minified == true ? undefined : options.delimiter || "  ");
   if(cb) {
     cb(null, stringified);
   }
   else {
-    fs.writeFileSync(`${__dirname}/${libRoot.substring(0, libRoot.length - 1)}.js`, `var ${libRoot.substring(0, libRoot.length - 1)} = ${stringified}`);
+    fs.writeFileSync(`${__dirname + "/"+ baseName}.js`,
+                    `var ${baseName} = ${stringified};\n${genInit(baseName)};`);
     console.log("successfully wrote to:", __dirname + "/" + libRoot.substring(0, libRoot.length - 1) + ".js");
+  }
+}
+
+function duplicateKeys(dest, src, overwrite) {
+  if(typeof src === "object" && typeof dest === "object" && !Array.isArray(src) && !Array.isArray(dest)) {
+    var keys = Object.keys(src);
+    for(var i = 0 ; i < keys.length; i++) {
+      var key = keys[i];
+      if(overwrite) {
+        dest[key] = src[key];
+      } else {
+        dest[key] = dest[key] || src[key];
+      }
+    }
   }
 }
 
@@ -93,32 +107,45 @@ function getNameEnding(name) {
   return name.substring(name.length - 3)
 }
 
+function genInit(baseName) {
+  return `if(${baseName}.init && ${baseName}.init.ready && typeof ${baseName}.init.ready === "function") {
+  ${baseName}.init.ready();
+}`
+}
+
 function handleDirectory(path_to_dir, isRoot) {
-  var _root = "{";
-  var hasEntry = false;
+  var _root = {};
   try {
     if(path_to_dir.charAt(path_to_dir.length -1) != "/")
       path_to_dir += "/";
     var files = fs.readdirSync(path_to_dir);
     for(var i = 0 ; i < files.length; i++) {
-      if(hasEntry) _root += ", ";
       var filename = files[i];
       var path_to_file = path_to_dir + filename;
       var stats = fs.statSync(path_to_file);
+
       if(stats.isDirectory()) {
         var dir = handleDirectory(path_to_dir + filename, false);
         if(dir && !dir.error) {
-          _root += `'${filename}': ${dir}`;
+          if(_root[filename]) {
+            duplicateKeys(_root[filename], dir, true);
+          }
+          else {
+            _root[filename] = dir;
+          }
         }
       } else {
         var file = handleFile(path_to_file, true)
         if(file && !file.error) {
-          _root += `'${getBaseName(filename)}': ${file}`
+          if(_root[getBaseName(filename)]) {
+            duplicateKeys(_root[getBaseName(filename)], file, true);
+          }
+          else {
+            _root[getBaseName(filename)] = file;
+          }
         }
       }
-      hasEntry = true;
     }
-    _root += "}";
     return _root;
   } catch(e) {
     console.log(e, "handle dir");
@@ -132,11 +159,11 @@ function handleFile(path_to_file, selfEval) {
     var filestr = fs.readFileSync(path_to_file, "utf8");
     if(filestr.indexOf("function") != 0)
       filestr = filestr.substring(filestr.indexOf("{"));
-    if(!selfEval)
-      filestr = filestr.replace(/\\/g, "\\\\");
-    return filestr.replace(/'/g, "\\\'").replace(/\"/g, "'");
+    var file;
+    eval(`file = ${filestr}`);
+    return file;
   } catch(e) {
-    console.log(e, "handleFile");
+    console.error("Could not parse file: ", getDirName(path_to_file), e);
     return {error: e}
   }
 }
@@ -187,6 +214,7 @@ function stringify_object(o, divider, depth, lb) {
 }
 
 function whiteSpaceValue(delimiter) {
+  if(!delimiter) return 0;
   var val = 0;
   for(var i = 0 ; i < delimiter.length; i++) {
     var char = delimiter.charAt(i);
